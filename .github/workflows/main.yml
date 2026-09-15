@@ -1,0 +1,99 @@
+```yaml
+name: Vinted Trend Search
+
+permissions:
+  contents: write
+
+on:
+  workflow_dispatch:
+    inputs:
+      search:
+        description: "Vinted search keyword"
+        required: true
+        default: "running t shirt men"
+        type: string
+
+      pages:
+        description: "Number of pages to scan"
+        required: true
+        default: "5"
+        type: string
+
+  schedule:
+    # Runs every day at 07:00 UTC
+    - cron: "0 7 * * *"
+
+
+jobs:
+  search-vinted:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: "pip"
+
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+
+      - name: Choose search parameters
+        id: params
+        shell: bash
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            echo "search=${{ inputs.search }}" >> "$GITHUB_OUTPUT"
+            echo "pages=${{ inputs.pages }}" >> "$GITHUB_OUTPUT"
+          else
+            echo "search=running t shirt men" >> "$GITHUB_OUTPUT"
+            echo "pages=5" >> "$GITHUB_OUTPUT"
+          fi
+
+
+      - name: Run Vinted search
+        env:
+          PARSE_API_KEY: ${{ secrets.PARSE_API_KEY }}
+        run: |
+          python vinted_likes.py \
+            --search "${{ steps.params.outputs.search }}" \
+            --pages "${{ steps.params.outputs.pages }}"
+
+
+      - name: Create results folder
+        run: mkdir -p results
+
+
+      - name: Move CSV into results folder
+        shell: bash
+        run: |
+          for file in vinted_*_top100.csv; do
+            if [ -f "$file" ]; then
+              mv "$file" results/
+            fi
+          done
+
+
+      - name: Commit results to repository
+        shell: bash
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+          git add results/
+
+          if git diff --cached --quiet; then
+            echo "No changes to commit"
+          else
+            git commit -m "Update Vinted trend results"
+            git push
+          fi
+```
