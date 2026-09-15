@@ -5,7 +5,11 @@ import os
 import csv
 import argparse
 import re
+from datetime import datetime, timezone
+from pathlib import Path
+
 import requests
+
 
 API_KEY = os.environ["PARSE_API_KEY"]
 
@@ -21,8 +25,72 @@ def safe_filename(text):
     return text.strip("_")
 
 
+def get_listing_key(item):
+    """
+    Prefer Vinted item ID.
+    Fall back to URL if ID is unavailable.
+    """
+    return str(item.get("id") or item.get("url") or "")
+
+
+def load_previous_snapshot(history_folder):
+    """
+    Loads the newest existing CSV for this search,
+    before the current run creates a new one.
+    """
+
+    history_folder = Path(history_folder)
+
+    if not history_folder.exists():
+        return {}
+
+    csv_files = sorted(history_folder.glob("*.csv"))
+
+    if not csv_files:
+        return {}
+
+    previous_file = csv_files[-1]
+
+    print(f"Previous snapshot: {previous_file}")
+
+    previous = {}
+
+    with open(
+        previous_file,
+        "r",
+        newline="",
+        encoding="utf-8-sig"
+    ) as f:
+
+        reader = csv.DictReader(f)
+
+        for row in reader:
+
+            listing_id = row.get("Listing ID") or row.get("URL")
+
+            if not listing_id:
+                continue
+
+            try:
+                likes = int(float(row.get("Likes", 0) or 0))
+            except ValueError:
+                likes = 0
+
+            try:
+                rank = int(row.get("Rank", 0) or 0)
+            except ValueError:
+                rank = 0
+
+            previous[str(listing_id)] = {
+                "likes": likes,
+                "rank": rank,
+            }
+
+    return previous
+
+
 parser = argparse.ArgumentParser(
-    description="Find the most-liked Vinted UK listings for a keyword."
+    description="Track most-liked Vinted UK listings."
 )
 
 parser.add_argument(
@@ -35,7 +103,7 @@ parser.add_argument(
     "--pages",
     type=int,
     default=5,
-    help="Number of Vinted result pages to scan"
+    help="Number of result pages to scan"
 )
 
 args = parser.parse_args()
@@ -46,11 +114,45 @@ PAGES = args.pages
 if PAGES < 1:
     raise ValueError("Pages must be at least 1.")
 
+
+search_slug = safe_filename(SEARCH)
+
+history_folder = Path(
+    "results",
+    "history",
+    search_slug
+)
+
+latest_folder = Path(
+    "results",
+    "latest"
+)
+
+history_folder.mkdir(
+    parents=True,
+    exist_ok=True
+)
+
+latest_folder.mkdir(
+    parents=True,
+    exist_ok=True
+)
+
+
+# Load previous data BEFORE creating today's snapshot
+previous_data = load_previous_snapshot(
+    history_folder
+)
+
+
+print()
 print(f"Search: {SEARCH}")
 print(f"Pages: {PAGES}")
 print()
 
+
 all_items = []
+
 
 for page in range(1, PAGES + 1):
 
@@ -73,36 +175,50 @@ for page in range(1, PAGES + 1):
 
     payload = response.json()
 
-    items = payload.get("data", {}).get("items", [])
+    items = payload.get(
+        "data",
+        {}
+    ).get(
+        "items",
+        []
+    )
 
-    print(f"  Found {len(items)} listings")
+    print(
+        f"  Found {len(items)} listings"
+    )
 
     all_items.extend(items)
 
 
 print()
-print(f"Fetched {len(all_items)} listings in total.")
+print(
+    f"Fetched {len(all_items)} listings."
+)
 
 
-# Remove duplicate listings
+# Remove duplicates
 unique = {}
 
 for item in all_items:
 
-    item_id = item.get("id")
+    key = get_listing_key(item)
 
-    if item_id:
-        unique[item_id] = item
+    if key:
+        unique[key] = item
 
 
 items = list(unique.values())
 
-print(f"Unique listings: {len(items)}")
+print(
+    f"Unique listings: {len(items)}"
+)
 
 
-# Sort by likes
+# Sort by current likes
 items.sort(
-    key=lambda item: item.get("like_count") or 0,
+    key=lambda item: (
+        item.get("like_count") or 0
+    ),
     reverse=True,
 )
 
@@ -110,68 +226,187 @@ items.sort(
 top_100 = items[:100]
 
 
-print()
-print("TOP 100 BY LIKES")
-print("=" * 100)
+# Add trend calculations
+rows = []
 
+for rank, item in enumerate(
+    top_100,
+    start=1
+):
 
-for rank, item in enumerate(top_100, start=1):
+    listing_id = get_listing_key(item)
 
-    title = item.get("title") or "Unknown"
-    brand = item.get("brand") or "Unknown"
-    price = item.get("price_gbp") or "?"
-    likes = item.get("like_count") or 0
-    condition = item.get("condition") or ""
-    url = item.get("url") or ""
-
-    print(
-        f"{rank:>3}. "
-        f"{title[:50]:50} "
-        f"| £{price:<8} "
-        f"| Likes {likes:<5}"
+    current_likes = (
+        item.get("like_count") or 0
     )
 
-    print(f"     {url}")
+    previous = previous_data.get(
+        listing_id
+    )
+
+    if previous:
+
+        previous_likes = previous["likes"]
+        previous_rank = previous["rank"]
+
+        likes_gained = (
+            current_likes
+            - previous_likes
+        )
+
+        if previous_likes > 0:
+            likes_gain_percent = round(
+                (
+                    likes_gained
+                    / previous_likes
+                ) * 100,
+                1
+            )
+        else:
+            likes_gain_percent = ""
+
+        # Positive number = moved UP ranking
+        rank_change = (
+            previous_rank - rank
+        )
+
+        new_listing = "No"
+
+    else:
+
+        previous_likes = ""
+        previous_rank = ""
+        likes_gained = ""
+        likes_gain_percent = ""
+        rank_change = ""
+        new_listing = "Yes"
 
 
-# Create filename based on search
-search_slug = safe_filename(SEARCH)
-
-csv_filename = f"vinted_{search_slug}_top100.csv"
-
-
-# Save CSV
-with open(
-    csv_filename,
-    "w",
-    newline="",
-    encoding="utf-8-sig"
-) as f:
-
-    writer = csv.writer(f)
-
-    writer.writerow([
-        "Rank",
-        "Title",
-        "Brand",
-        "Price GBP",
-        "Likes",
-        "Condition",
-        "URL",
-    ])
-
-    for rank, item in enumerate(top_100, start=1):
-
-        writer.writerow([
-            rank,
-            item.get("title", ""),
-            item.get("brand", ""),
-            item.get("price_gbp", ""),
-            item.get("like_count", 0),
-            item.get("condition", ""),
-            item.get("url", ""),
-        ])
+    rows.append({
+        "Rank": rank,
+        "Listing ID": listing_id,
+        "Title": item.get(
+            "title",
+            ""
+        ),
+        "Brand": item.get(
+            "brand",
+            ""
+        ),
+        "Price GBP": item.get(
+            "price_gbp",
+            ""
+        ),
+        "Likes": current_likes,
+        "Previous Likes": previous_likes,
+        "Likes Gained": likes_gained,
+        "Likes Gained %": likes_gain_percent,
+        "Previous Rank": previous_rank,
+        "Rank Change": rank_change,
+        "New Listing": new_listing,
+        "Condition": item.get(
+            "condition",
+            ""
+        ),
+        "URL": item.get(
+            "url",
+            ""
+        ),
+    })
 
 
 print()
-print(f"Saved CSV: {csv_filename}")
+print("TOP 100 BY LIKES")
+print("=" * 110)
+
+for row in rows:
+
+    gain = row["Likes Gained"]
+
+    if gain == "":
+        gain_display = "NEW"
+    elif gain > 0:
+        gain_display = f"+{gain}"
+    else:
+        gain_display = str(gain)
+
+    print(
+        f'{row["Rank"]:>3}. '
+        f'{row["Title"][:48]:48} '
+        f'| £{str(row["Price GBP"]):<7} '
+        f'| Likes {row["Likes"]:<4} '
+        f'| Gain {gain_display}'
+    )
+
+
+# UTC timestamp keeps GitHub runs consistent
+timestamp = datetime.now(
+    timezone.utc
+).strftime(
+    "%Y-%m-%d_%H%M"
+)
+
+
+history_filename = (
+    history_folder
+    / f"{timestamp}.csv"
+)
+
+latest_filename = (
+    latest_folder
+    / f"{search_slug}.csv"
+)
+
+
+fieldnames = [
+    "Rank",
+    "Listing ID",
+    "Title",
+    "Brand",
+    "Price GBP",
+    "Likes",
+    "Previous Likes",
+    "Likes Gained",
+    "Likes Gained %",
+    "Previous Rank",
+    "Rank Change",
+    "New Listing",
+    "Condition",
+    "URL",
+]
+
+
+def write_csv(filename):
+
+    with open(
+        filename,
+        "w",
+        newline="",
+        encoding="utf-8-sig"
+    ) as f:
+
+        writer = csv.DictWriter(
+            f,
+            fieldnames=fieldnames
+        )
+
+        writer.writeheader()
+
+        writer.writerows(rows)
+
+
+write_csv(history_filename)
+
+write_csv(latest_filename)
+
+
+print()
+print(
+    f"Historical snapshot saved: "
+    f"{history_filename}"
+)
+
+print(
+    f"Latest results saved: "
+    f"{latest_filename}"
+)
