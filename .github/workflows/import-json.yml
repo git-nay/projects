@@ -1,0 +1,61 @@
+name: Import Vinted JSON
+
+on:
+  workflow_dispatch:
+    inputs:
+      search:
+        description: "Keyword represented by the JSON"
+        required: true
+        default: "running t shirt men"
+        type: string
+
+      json_url:
+        description: "GitHub Pages JSON endpoint"
+        required: true
+        default: "https://git-nay.github.io/projects/api/search/running_t_shirt_men.json"
+        type: string
+
+permissions:
+  contents: write
+
+jobs:
+  import:
+    runs-on: ubuntu-latest
+
+    steps:
+
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+
+      - name: Import JSON and calculate trends
+        run: |
+          python collect.py \
+            --source json \
+            --input "${{ inputs.json_url }}" \
+            --search "${{ inputs.search }}" \
+            --top 100
+
+      - name: Build JSON API
+        run: python build_api.py
+
+      - name: Commit generated data
+        shell: bash
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+          git add results/ site/api/
+
+          if git diff --cached --quiet; then
+            echo "No changes to commit"
+          else
+            git commit -m "Update Vinted trends: ${{ inputs.search }}"
+            git push
+          fi
