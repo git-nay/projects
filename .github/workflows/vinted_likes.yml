@@ -1,11 +1,12 @@
+```yaml
 name: Vinted Trend Search
 
+permissions:
+  contents: write
+
 on:
-
   workflow_dispatch:
-
     inputs:
-
       search:
         description: "Vinted search keyword"
         required: true
@@ -18,27 +19,24 @@ on:
         default: "5"
         type: string
 
-
   schedule:
-
-    # Runs daily at 07:00 UTC
+    # Runs every day at 07:00 UTC
     - cron: "0 7 * * *"
 
 
 jobs:
-
   search-vinted:
-
     runs-on: ubuntu-latest
 
     steps:
-
       - name: Checkout repository
-        uses: actions/checkout@v7
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
 
       - name: Set up Python
-        uses: actions/setup-python@v7
+        uses: actions/setup-python@v5
         with:
           python-version: "3.13"
           cache: "pip"
@@ -70,10 +68,32 @@ jobs:
             --pages "${{ steps.params.outputs.pages }}"
 
 
-      - name: Upload CSV
-        uses: actions/upload-artifact@v7
-        with:
-          name: vinted-results
-          path: "vinted_*_top100.csv"
-          if-no-files-found: error
-          retention-days: 30
+      - name: Create results folder
+        run: mkdir -p results
+
+
+      - name: Move CSV into results folder
+        shell: bash
+        run: |
+          for file in vinted_*_top100.csv; do
+            if [ -f "$file" ]; then
+              mv "$file" results/
+            fi
+          done
+
+
+      - name: Commit results to repository
+        shell: bash
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+          git add results/
+
+          if git diff --cached --quiet; then
+            echo "No changes to commit"
+          else
+            git commit -m "Update Vinted trend results"
+            git push
+          fi
+```
