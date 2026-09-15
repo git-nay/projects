@@ -1,31 +1,79 @@
-name: Run Vinted Trends
+name: Vinted Trend Search
 
 on:
+
   workflow_dispatch:
 
+    inputs:
+
+      search:
+        description: "Vinted search keyword"
+        required: true
+        default: "running t shirt men"
+        type: string
+
+      pages:
+        description: "Number of pages to scan"
+        required: true
+        default: "5"
+        type: string
+
+
+  schedule:
+
+    # Runs daily at 07:00 UTC
+    - cron: "0 7 * * *"
+
+
 jobs:
-  run:
+
+  search-vinted:
+
     runs-on: ubuntu-latest
 
     steps:
+
       - name: Checkout repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
+
 
       - name: Set up Python
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@v7
         with:
           python-version: "3.13"
+          cache: "pip"
+
 
       - name: Install dependencies
         run: pip install -r requirements.txt
 
-      - name: Run Vinted script
+
+      - name: Choose search parameters
+        id: params
+        shell: bash
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            echo "search=${{ inputs.search }}" >> "$GITHUB_OUTPUT"
+            echo "pages=${{ inputs.pages }}" >> "$GITHUB_OUTPUT"
+          else
+            echo "search=running t shirt men" >> "$GITHUB_OUTPUT"
+            echo "pages=5" >> "$GITHUB_OUTPUT"
+          fi
+
+
+      - name: Run Vinted search
         env:
           PARSE_API_KEY: ${{ secrets.PARSE_API_KEY }}
-        run: python vinted_likes.py
+        run: |
+          python vinted_likes.py \
+            --search "${{ steps.params.outputs.search }}" \
+            --pages "${{ steps.params.outputs.pages }}"
+
 
       - name: Upload CSV
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
-          name: vinted-top-100
-          path: vinted_top_100.csv
+          name: vinted-results
+          path: "vinted_*_top100.csv"
+          if-no-files-found: error
+          retention-days: 30
