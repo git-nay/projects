@@ -1,0 +1,57 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <title>Vinted Trends API</title>
+</head>
+
+<body>
+
+<h1>Vinted Trends API</h1>
+
+<p>
+    GitHub-hosted Vinted trend data.
+</p>
+
+<h2>Endpoints</h2>
+
+<ul id="keywords">
+</ul>
+
+<script>
+
+fetch("./api/keywords.json")
+    .then(response => response.json())
+    .then(data => {
+
+        const list =
+            document.getElementById("keywords");
+
+        data.keywords.forEach(item => {
+
+            const li =
+                document.createElement("li");
+
+            const link =
+                document.createElement("a");
+
+            link.href = item.endpoint;
+
+            link.textContent =
+                item.keyword +
+                " (" +
+                item.count +
+                " listings)";
+
+            li.appendChild(link);
+
+            list.appendChild(li);
+
+        });
+
+    });
+
+</script>
+
+</body>
+</html>
