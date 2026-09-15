@@ -26,18 +26,22 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
+
       - name: Checkout repository
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
+
 
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
           python-version: "3.13"
 
+
       - name: Install dependencies
         run: pip install -r requirements.txt
+
 
       - name: Set search parameters
         id: params
@@ -51,7 +55,8 @@ jobs:
             echo "pages=5" >> "$GITHUB_OUTPUT"
           fi
 
-      - name: Run Vinted search
+
+      - name: Run Vinted trend search
         env:
           PARSE_API_KEY: ${{ secrets.PARSE_API_KEY }}
         run: |
@@ -59,24 +64,8 @@ jobs:
             --search "${{ steps.params.outputs.search }}" \
             --pages "${{ steps.params.outputs.pages }}"
 
-      - name: Create results folder
-        run: mkdir -p results
 
-      - name: Move CSV to results
-        shell: bash
-        run: |
-          shopt -s nullglob
-
-          files=(vinted_*_top100.csv)
-
-          if [ ${#files[@]} -eq 0 ]; then
-            echo "No CSV file was generated"
-            exit 1
-          fi
-
-          mv "${files[@]}" results/
-
-      - name: Commit results
+      - name: Commit trend data
         shell: bash
         run: |
           git config user.name "github-actions[bot]"
@@ -87,6 +76,6 @@ jobs:
           if git diff --cached --quiet; then
             echo "No changes to commit"
           else
-            git commit -m "Update Vinted trend results"
+            git commit -m "Update Vinted trend data: ${{ steps.params.outputs.search }}"
             git push
           fi
